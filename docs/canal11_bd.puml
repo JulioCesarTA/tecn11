@@ -1,0 +1,242 @@
+@startuml canal11_bd
+' Diagrama de la base de datos - esquema canal11 (PostgreSQL)
+' Generado a partir de sql/01_tablas.sql + sql/03_mejoras.sql (estructura real de la base)
+' PK = clave primaria, FK = clave foranea, UQ = unico, NN = no nulo
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #1F3A5F
+  HeaderBackgroundColor #1F3A5F
+  HeaderFontColor #FFFFFF
+  ArrowColor #1F3A5F
+}
+skinparam note {
+  BackgroundColor #FFF8E1
+  BorderColor #C9A227
+}
+
+title Canal 11 - Gestión de Programación y Contenidos\nEsquema de base de datos "canal11"
+
+' ===================================================== CU1
+entity "usuario" as usuario {
+  * **id_usuario** : serial <<PK>>
+  --
+  * ci : varchar(20) <<UQ>>
+  * nombre : varchar(80)
+  * apellido : varchar(80)
+  * email : varchar(120) <<UQ>> (sin distinguir mayúsculas)
+  telefono : varchar(20)
+  * rol : varchar(20)
+    ADMINISTRADOR | ENCARGADO | PRODUCCION
+  * activo : boolean = true
+  * fecha_registro : timestamp = now()
+}
+
+' ===================================================== CU2
+entity "programa" as programa {
+  * **id_programa** : serial <<PK>>
+  --
+  * nombre : varchar(120) <<UQ>>
+  descripcion : varchar(255)
+  * tipo : varchar(20)
+    NOTICIERO | REVISTA | PELICULA | DOCUMENTAL | SERIE | OTRO
+  * duracion_min : integer (> 0)
+  genero : varchar(60)
+  clasificacion : varchar(10)
+  * activo : boolean = true
+}
+
+' ===================================================== CU4 / CU5
+entity "material" as material {
+  * **id_material** : serial <<PK>>
+  --
+  * codigo : varchar(20) <<UQ>>
+  id_programa : integer <<FK>>
+  * titulo : varchar(160)
+  descripcion : varchar(500)
+  * tipo : varchar(20)
+    PROGRAMA | SPOT | PROMO
+  * duracion_seg : integer (> 0)
+  * formato : varchar(10)  MP4 | MOV | MXF
+  * ruta : varchar(255) <<UQ>>
+  * estado : varchar(20) = PENDIENTE
+    PENDIENTE | APROBADO | RECHAZADO
+  observacion : varchar(255)
+  * registrado_por : integer <<FK>>
+  * fecha_registro : timestamp = now()
+  validado_por : integer <<FK>>
+  fecha_validacion : timestamp
+  * activo : boolean = true
+  .. plazo de revisión ..
+  * pendiente_desde : timestamp = now()
+  ultimo_aviso : timestamp
+  * avisos : integer = 0 (0 a 2)
+}
+
+' ===================================================== CU3
+entity "parrilla" as parrilla {
+  * **id_parrilla** : serial <<PK>>
+  --
+  * fecha : date <<UQ>>
+  * estado : varchar(20) = BORRADOR
+    BORRADOR | PUBLICADA
+  * creado_por : integer <<FK>>
+  * fecha_creacion : timestamp = now()
+  fecha_publicacion : timestamp
+}
+
+entity "bloque" as bloque {
+  * **id_bloque** : serial <<PK>>
+  --
+  * id_parrilla : integer <<FK>>
+  id_programa : integer <<FK>>
+  id_material : integer <<FK>>
+  * hora_inicio : time
+  * hora_fin : time (> hora_inicio)
+  * tipo : varchar(20)
+    PROGRAMA | PAUSA_COMERCIAL
+  --
+  UQ (id_parrilla, hora_inicio)
+}
+
+entity "escaleta" as escaleta {
+  * **id_escaleta** : serial <<PK>>
+  --
+  * id_bloque : integer <<FK>>
+  * orden : integer (> 0)
+  * id_material : integer <<FK>>
+  * registrado_por : integer <<FK>>
+  --
+  UQ (id_bloque, orden) DEFERRABLE
+  UQ (id_bloque, id_material)
+}
+
+' ===================================================== CU6
+entity "pauta" as pauta {
+  * **id_pauta** : serial <<PK>>
+  --
+  * nombre : varchar(150) <<UQ>>
+  * anunciante : varchar(150)
+  * fecha_inicio : date
+  * fecha_fin : date (>= fecha_inicio)
+  * max_pases : integer (> 0)
+  * activo : boolean = true
+}
+
+entity "spot" as spot {
+  * **id_spot** : serial <<PK>>
+  --
+  * id_pauta : integer <<FK>>
+  * id_material : integer <<FK>>
+  * id_bloque : integer <<FK>>
+  * hora : time
+  * estado : varchar(20) = PROGRAMADO
+    PROGRAMADO | EMITIDO | NO_EMITIDO
+  --
+  UQ (id_bloque, hora)
+}
+
+' ===================================================== CU7
+entity "emision" as emision {
+  * **id_emision** : serial <<PK>>
+  --
+  * id_bloque : integer <<FK>> <<UQ>>
+  * inicio_real : timestamp
+  fin_real : timestamp (> inicio_real)
+  * estado : varchar(20)
+    EMITIDO | PARCIAL | NO_EMITIDO
+  * registrado_por : integer <<FK>>
+}
+
+entity "auditoria" as auditoria {
+  * **id_auditoria** : serial <<PK>>
+  --
+  id_usuario : integer <<FK>>
+  * accion : varchar(20)
+  * entidad : varchar(30)
+  id_entidad : integer
+  detalle : varchar(500)
+  comando : varchar(500)
+  * fecha : timestamp = now()
+}
+
+' ===================================================== avisos automáticos
+entity "aviso_enviado" as aviso_enviado {
+  * **tipo** : varchar(30) <<PK>>
+  * **clave** : varchar(80) <<PK>>
+  --
+  * fecha : timestamp = now()
+}
+
+' ===================================================== relaciones
+' catálogo y materiales
+programa |o--o{ material : "pertenece a\n(obligatorio si tipo = PROGRAMA)"
+usuario ||--o{ material : "registra"
+usuario |o--o{ material : "valida"
+
+' parrilla
+usuario ||--o{ parrilla : "crea"
+parrilla ||--o{ bloque : "tiene\n(ON DELETE CASCADE)"
+programa |o--o{ bloque : "se emite en"
+material |o--o{ bloque : "se emite en"
+
+' escaleta del noticiero
+bloque ||--o{ escaleta : "ordena sus notas\n(ON DELETE CASCADE)"
+material ||--o{ escaleta : "es nota de"
+usuario ||--o{ escaleta : "registra"
+
+' pautas y spots
+pauta ||--o{ spot : "contrata"
+material ||--o{ spot : "se usa en"
+bloque ||--o{ spot : "contiene\n(ON DELETE CASCADE)"
+
+' emisión y auditoría
+bloque ||--o| emision : "se emitió\n(ON DELETE CASCADE)"
+usuario ||--o{ emision : "registra"
+usuario |o--o{ auditoria : "hizo el cambio"
+
+' ===================================================== reglas en la base
+note right of material
+  **ck_material_rechazo**: RECHAZADO exige observación
+  **ck_material_validado**: si no es PENDIENTE
+  exige validado_por
+end note
+
+note bottom of bloque
+  **ck_bloque_tipo**:
+  PROGRAMA => id_programa NOT NULL
+  PAUSA_COMERCIAL => id_programa y id_material NULL
+  **ex_bloque_sin_solape** (btree_gist):
+  dos bloques de la misma parrilla no se solapan
+end note
+
+note right of parrilla
+  trigger **fn_validar_publicacion**:
+  al pasar a PUBLICADA debe tener bloques y
+  cada bloque PROGRAMA un material activo y APROBADO
+  (o una escaleta)
+end note
+
+note bottom of spot
+  trigger **fn_validar_spot**: bloque PAUSA_COMERCIAL,
+  hora dentro de la pausa, material SPOT aprobado
+  trigger **fn_validar_spot_pauta**: fecha dentro de la
+  vigencia y sin superar max_pases (NO_EMITIDO no cuenta)
+end note
+
+note bottom of auditoria
+  trigger **fn_auditoria_inmutable**:
+  solo inserción (rechaza UPDATE, DELETE, TRUNCATE)
+end note
+
+note bottom of aviso_enviado
+  Avisos automáticos ya enviados
+  (recordatorios, alertas) para no repetirlos.
+  Sin relaciones.
+end note
+
+@enduml
